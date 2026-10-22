@@ -509,6 +509,85 @@ function assertClose(a, b, msg) {
   assert(dc.month === fresh.startMonth, 'Data contract default month = start month')
 }
 
+// --- Test 7: multiple one-time expenses land in their own months ---
+{
+  const state = createDefaultState()
+  state.payroll = state.payroll.map((p) => ({ ...p, monthlyAmount: 0 }))
+  state.expenseBuckets = state.expenseBuckets.map((b) => ({
+    ...b,
+    monthlyAmount: 0,
+  }))
+  state.revenueRows = state.revenueRows.map((r) => ({ ...r, amounts: {} }))
+  state.expectedAR = 0
+  state.forecastMonths = 12
+  state.oneTimeExpenses = [
+    {
+      id: 'ot-dc',
+      name: 'Data contract',
+      amount: 5000,
+      month: '2026-11',
+    },
+    {
+      id: 'ot-legal',
+      name: 'Legal setup',
+      amount: 2500,
+      month: '2026-12',
+    },
+    {
+      id: 'ot-equip',
+      name: 'Equipment',
+      amount: 1200,
+      month: '2027-02',
+    },
+  ]
+
+  const f = projectForecast(state)
+  assertClose(f.months[0].expenses, 5000, 'Nov gets Data contract only')
+  assertClose(f.months[1].expenses, 2500, 'Dec gets Legal setup only')
+  assertClose(f.months[2].expenses, 0, 'Jan has no one-time')
+  assertClose(f.months[3].expenses, 1200, 'Feb gets Equipment only')
+  assertClose(
+    f.months.reduce((s, m) => s + m.expenses, 0),
+    5000 + 2500 + 1200,
+    'multi one-time sum once across forecast',
+  )
+  assertClose(f.totalMonthlyExpenses, 5000, 'month-1 total is Data contract only')
+  assertClose(
+    f.months[0].endingCash,
+    142135 - 5000,
+    'Nov ending after Data contract',
+  )
+  assertClose(
+    f.months[1].endingCash,
+    142135 - 5000 - 2500,
+    'Dec ending after Legal',
+  )
+  assertClose(
+    f.months[3].endingCash,
+    142135 - 5000 - 2500 - 1200,
+    'Feb ending after Equipment',
+  )
+
+  // Two items in the same month sum together
+  state.oneTimeExpenses = [
+    {
+      id: 'ot-a',
+      name: 'Data contract',
+      amount: 3000,
+      month: '2026-11',
+    },
+    {
+      id: 'ot-b',
+      name: 'Launch fee',
+      amount: 700,
+      month: '2026-11',
+    },
+  ]
+  const same = projectForecast(state)
+  assertClose(same.months[0].expenses, 3700, 'same-month one-times sum')
+  assertClose(same.months[1].expenses, 0, 'other months stay zero')
+}
+
 if (failed > 0) {
   console.error(`\n${failed} assertion(s) failed`)
   process.exit(1)

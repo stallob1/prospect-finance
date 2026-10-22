@@ -312,6 +312,39 @@ export default function App() {
     }))
   }
 
+  function addOneTime() {
+    setState((s) => {
+      const rows = s.oneTimeExpenses ?? []
+      const dc = rows.find((e) => e.name === 'Data contract')
+      const month = dc?.month ?? s.startMonth
+      return {
+        ...s,
+        oneTimeExpenses: [
+          ...rows,
+          {
+            id: uid('ot'),
+            name: 'One-time expense',
+            amount: 0,
+            month,
+          },
+        ],
+      }
+    })
+  }
+
+  function removeOneTime(id: string) {
+    setState((s) => {
+      const rows = s.oneTimeExpenses ?? []
+      const target = rows.find((e) => e.id === id)
+      // Keep seeded Data contract row; other rows are removable.
+      if (target?.name === 'Data contract') return s
+      return {
+        ...s,
+        oneTimeExpenses: rows.filter((e) => e.id !== id),
+      }
+    })
+  }
+
   function setBucketOverride(id: string, month: YearMonth, value: number | null) {
     setState((s) => ({
       ...s,
@@ -784,47 +817,70 @@ export default function App() {
       <section className="panel">
         <div className="panel-head">
           <h2>One-time expenses</h2>
-          <p className="hint">
-            Prospect cash hits in a single payment month (not recurring). Default
-            amount $0.
-          </p>
+          <button type="button" className="btn" onClick={addOneTime}>
+            Add one-time expense
+          </button>
         </div>
+        <p className="hint">
+          Prospect cash hits in a single payment month (not recurring). Default
+          amount $0. Each row is counted only in its payment month.
+        </p>
         <ul className="bucket-list">
-          {(state.oneTimeExpenses ?? []).map((e) => (
-            <li key={e.id} className="bucket-row">
-              <div className="bucket-main one-time-main">
-                <span className="one-time-name">{e.name}</span>
-                <label>
-                  Amount
+          {(state.oneTimeExpenses ?? []).map((e) => {
+            const isDataContract = e.name === 'Data contract'
+            return (
+              <li key={e.id} className="bucket-row">
+                <div className="bucket-main one-time-main">
                   <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={e.amount}
-                    aria-label={`${e.name} amount`}
+                    className="name-input"
+                    value={e.name}
+                    aria-label="One-time expense name"
                     onChange={(ev) =>
-                      updateOneTime(e.id, {
-                        amount: Number(ev.target.value) || 0,
-                      })
+                      updateOneTime(e.id, { name: ev.target.value })
                     }
                   />
-                </label>
-                <label>
-                  Payment month
-                  <input
-                    type="month"
-                    value={e.month}
-                    aria-label={`${e.name} payment month`}
-                    onChange={(ev) =>
-                      updateOneTime(e.id, {
-                        month: ev.target.value || e.month,
-                      })
-                    }
-                  />
-                </label>
-              </div>
-            </li>
-          ))}
+                  <label>
+                    Amount
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={e.amount}
+                      aria-label={`${e.name} amount`}
+                      onChange={(ev) =>
+                        updateOneTime(e.id, {
+                          amount: Number(ev.target.value) || 0,
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Payment month
+                    <input
+                      type="month"
+                      value={e.month}
+                      aria-label={`${e.name} payment month`}
+                      onChange={(ev) =>
+                        updateOneTime(e.id, {
+                          month: ev.target.value || e.month,
+                        })
+                      }
+                    />
+                  </label>
+                  {!isDataContract && (
+                    <button
+                      type="button"
+                      className="btn ghost danger"
+                      onClick={() => removeOneTime(e.id)}
+                      aria-label={`Remove ${e.name}`}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </li>
+            )
+          })}
         </ul>
       </section>
 
