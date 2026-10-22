@@ -3,6 +3,14 @@
  * Keep in sync with the TypeScript sources when changing forecast rules.
  */
 
+const PLANNING_HORIZONS = [3, 6, 9, 12]
+
+function normalizeHorizon(n) {
+  const v = typeof n === 'number' ? n : Number(n)
+  if (PLANNING_HORIZONS.includes(v)) return v
+  return 12
+}
+
 function addMonths(ym, delta) {
   const [ys, ms] = ym.split('-')
   const y = Number(ys)
@@ -74,9 +82,10 @@ function computeRunway(months) {
   }
 
   if (!anyShortfall) {
+    const horizon = months.length
     return {
-      kind: 'twelve-plus',
-      label: '12+ months',
+      kind: 'horizon-plus',
+      label: `${horizon}+ months`,
       exhaustionMonth: null,
       months: Infinity,
     }
@@ -106,7 +115,8 @@ function computeRunway(months) {
 }
 
 function projectForecast(state) {
-  const keys = monthKeys(state.startMonth, state.forecastMonths)
+  const horizon = normalizeHorizon(state.forecastMonths)
+  const keys = monthKeys(state.startMonth, horizon)
   const projections = []
   let beginning = Number(state.availableCash) || 0
 
@@ -138,6 +148,32 @@ function projectForecast(state) {
     totalMonthlyExpenses: first ? first.expenses : 0,
     operatingNetBurn: first ? first.operatingNetBurn : 0,
     runway: computeRunway(projections),
+  }
+}
+
+function computeBurnBudget(state, currentBurn) {
+  const horizonMonths = normalizeHorizon(state.forecastMonths)
+  const cash = Number(state.availableCash) || 0
+  const ar = Number(state.expectedAR) || 0
+  const keys = monthKeys(state.startMonth, horizonMonths)
+  const arInHorizon = ar > 0 && keys.includes(state.arCollectionMonth)
+
+  const cashCeiling = horizonMonths > 0 ? cash / horizonMonths : 0
+  const softCeiling = arInHorizon ? (cash + ar) / horizonMonths : cashCeiling
+
+  const burn =
+    currentBurn !== undefined
+      ? currentBurn
+      : projectForecast(state).operatingNetBurn
+
+  return {
+    horizonMonths,
+    cashCeiling,
+    softCeiling,
+    arInHorizon,
+    currentBurn: burn,
+    remainingBudget: cashCeiling - burn,
+    onTrack: burn <= cashCeiling,
   }
 }
 
@@ -313,6 +349,75 @@ function assertClose(a, b, msg) {
     'moved AR no double count',
   )
   assertClose(f.months[0].arCollections, 0, 'Nov no longer has AR')
+}
+
+// --- Test 4: horizon toggle drives forecast length + runway label ---
+{
+  const state = createDefaultState()
+  state.payroll[0].monthlyAmount = 5000
+  for (const h of PLANNING_HORIZONS) {
+    state.forecastMonths = h
+    const f = projectForecast(state)
+    assert(f.months.length === h, `forecast length ${h}`)
+  }
+
+  // Positive burn but cash lasts beyond a short horizon → horizon-plus label
+  state.availableCash = 200000
+  state.expectedAR = 0
+  state.forecastMonths = 3
+  state.payroll = [{ id: 'p', name: 'A', monthlyAmount: 10000 }]
+  state.expenseBuckets = state.expenseBuckets.map((b) => ({
+    ...b,
+    monthlyAmount: 0,
+  }))
+  state.revenueRows = state.revenueRows.map((r) => ({ ...r, amounts: {} }))
+  const short = projectForecast(state)
+  assert(short.runway.kind === 'horizon-plus', 'short horizon no shortfall → horizon-plus')
+  assert(short.runway.label === '3+ months', 'horizon-plus label uses 3')
+
+  assert(normalizeHorizon(6) === 6, 'normalizeHorizon keeps 6')
+  assert(normalizeHorizon(99) === 12, 'normalizeHorizon clamps invalid to 12')
+  assert(normalizeHorizon('x') === 12, 'normalizeHorizon NaN → 12')
+}
+
+// --- Test 5: burn budget from available cash; AR soft band; remaining ---
+{
+  const state = createDefaultState()
+  // ~142135 cash → 12 ≈ 11844.6; with AR in horizon soft ≈ 12504.2
+  state.forecastMonths = 12
+  state.payroll = state.payroll.map((p) => ({ ...p, monthlyAmount: 0 }))
+  state.expenseBuckets = state.expenseBuckets.map((b) => ({
+    ...b,
+    monthlyAmount: 0,
+  }))
+
+  let budget = computeBurnBudget(state, 0)
+  assertClose(budget.cashCeiling, 142135 / 12, '12mo cash ceiling')
+  assert(budget.arInHorizon, 'default AR in 12mo horizon')
+  assertClose(budget.softCeiling, (142135 + 7915) / 12, '12mo soft ceiling with AR')
+  assertClose(budget.remainingBudget, 142135 / 12, 'remaining = ceiling − 0 burn')
+  assert(budget.onTrack, 'zero burn is on track')
+
+  state.forecastMonths = 3
+  budget = computeBurnBudget(state, 0)
+  assertClose(budget.cashCeiling, 142135 / 3, '3mo cash ceiling ≈47k')
+  assertClose(budget.softCeiling, (142135 + 7915) / 3, '3mo soft ≈50k')
+
+  state.forecastMonths = 6
+  budget = computeBurnBudget(state, 20000)
+  assertClose(budget.cashCeiling, 142135 / 6, '6mo cash ceiling ≈24k')
+  assertClose(budget.remainingBudget, 142135 / 6 - 20000, 'remaining vs month-1 burn')
+  assert(budget.onTrack, '20k under ~24k ceiling → on track')
+
+  budget = computeBurnBudget(state, 30000)
+  assert(!budget.onTrack, '30k over ~24k ceiling → over budget')
+
+  // AR outside horizon: soft = cash only
+  state.forecastMonths = 3
+  state.arCollectionMonth = '2027-06'
+  budget = computeBurnBudget(state, 0)
+  assert(!budget.arInHorizon, 'AR outside 3mo horizon')
+  assertClose(budget.softCeiling, budget.cashCeiling, 'no AR soft uplift when timed out')
 }
 
 if (failed > 0) {

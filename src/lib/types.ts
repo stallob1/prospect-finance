@@ -27,6 +27,10 @@ export interface RevenueRow {
   isFunding: boolean
 }
 
+/** Allowed planning horizons (months). Reused as `forecastMonths`. */
+export const PLANNING_HORIZONS = [3, 6, 9, 12] as const
+export type PlanningHorizon = (typeof PLANNING_HORIZONS)[number]
+
 export interface AppState {
   startMonth: YearMonth
   availableCash: number
@@ -35,7 +39,37 @@ export interface AppState {
   payroll: PayrollPosition[]
   expenseBuckets: ExpenseBucket[]
   revenueRows: RevenueRow[]
-  forecastMonths: number
+  /** Planning / forecast horizon in months (3 | 6 | 9 | 12). Default 12. */
+  forecastMonths: PlanningHorizon
+}
+
+/** Named what-if snapshot; each holds a full AppState. */
+export interface Scenario {
+  id: string
+  name: string
+  state: AppState
+}
+
+export interface ScenarioStore {
+  activeScenarioId: string
+  scenarios: Scenario[]
+}
+
+/** Max monthly operating net burn to stretch available cash across the horizon. */
+export interface BurnBudget {
+  horizonMonths: PlanningHorizon
+  /** availableCash / horizon — conservative ceiling (cash only) */
+  cashCeiling: number
+  /** (availableCash + AR) / horizon when AR lands inside horizon; else same as cashCeiling */
+  softCeiling: number
+  /** Whether expected AR is timed inside the selected horizon */
+  arInHorizon: boolean
+  /** Month-1 operating net burn (expenses − op receipts − AR) */
+  currentBurn: number
+  /** cashCeiling − currentBurn; positive = under budget */
+  remainingBudget: number
+  /** currentBurn <= cashCeiling */
+  onTrack: boolean
 }
 
 export interface MonthProjection {
@@ -50,7 +84,7 @@ export interface MonthProjection {
   operatingNetBurn: number
 }
 
-export type RunwayKind = 'no-burn' | 'months' | 'twelve-plus'
+export type RunwayKind = 'no-burn' | 'months' | 'horizon-plus'
 
 export interface RunwayResult {
   kind: RunwayKind
@@ -58,7 +92,7 @@ export interface RunwayResult {
   label: string
   /** Estimated exhaustion month (YYYY-MM), or null if none within forecast */
   exhaustionMonth: YearMonth | null
-  /** Fractional months of runway from start, or Infinity for no-burn / 12+ */
+  /** Fractional months of runway from start, or Infinity for no-burn / horizon+ */
   months: number
 }
 

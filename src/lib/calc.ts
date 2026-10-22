@@ -1,11 +1,26 @@
 import type {
   AppState,
+  BurnBudget,
   ExpenseBucket,
   ForecastResult,
   MonthProjection,
+  PlanningHorizon,
   RunwayResult,
   YearMonth,
 } from './types'
+import { PLANNING_HORIZONS } from './types'
+
+export { PLANNING_HORIZONS }
+export type { PlanningHorizon }
+
+/** Clamp / normalize to an allowed planning horizon (default 12). */
+export function normalizeHorizon(n: unknown): PlanningHorizon {
+  const v = typeof n === 'number' ? n : Number(n)
+  if ((PLANNING_HORIZONS as readonly number[]).includes(v)) {
+    return v as PlanningHorizon
+  }
+  return 12
+}
 
 /** Parse YYYY-MM into year + zero-based month index helpers. */
 function parseYearMonth(ym: YearMonth): { y: number; m: number } {
@@ -96,9 +111,10 @@ function computeRunway(months: MonthProjection[]): RunwayResult {
   }
 
   if (!anyShortfall) {
+    const horizon = months.length
     return {
-      kind: 'twelve-plus',
-      label: '12+ months',
+      kind: 'horizon-plus',
+      label: `${horizon}+ months`,
       exhaustionMonth: null,
       months: Infinity,
     }
@@ -129,7 +145,8 @@ function computeRunway(months: MonthProjection[]): RunwayResult {
 }
 
 export function projectForecast(state: AppState): ForecastResult {
-  const keys = monthKeys(state.startMonth, state.forecastMonths)
+  const horizon = normalizeHorizon(state.forecastMonths)
+  const keys = monthKeys(state.startMonth, horizon)
   const projections: MonthProjection[] = []
   let beginning = Number(state.availableCash) || 0
 
@@ -164,5 +181,46 @@ export function projectForecast(state: AppState): ForecastResult {
     totalMonthlyExpenses,
     operatingNetBurn,
     runway: computeRunway(projections),
+  }
+}
+
+/**
+ * Approximate max monthly operating net burn to last `horizon` months from
+ * starting cash. AR is not folded into cash — when it lands inside the
+ * horizon it lifts a soft upper band only (no double-count).
+ *
+ * Current burn = month-1 operating net burn (same as forecast summary).
+ */
+export function computeBurnBudget(
+  state: AppState,
+  currentBurn?: number,
+): BurnBudget {
+  const horizonMonths = normalizeHorizon(state.forecastMonths)
+  const cash = Number(state.availableCash) || 0
+  const ar = Number(state.expectedAR) || 0
+  const keys = monthKeys(state.startMonth, horizonMonths)
+  const arInHorizon =
+    ar > 0 && keys.includes(state.arCollectionMonth)
+
+  const cashCeiling = horizonMonths > 0 ? cash / horizonMonths : 0
+  const softCeiling = arInHorizon
+    ? (cash + ar) / horizonMonths
+    : cashCeiling
+
+  const burn =
+    currentBurn !== undefined
+      ? currentBurn
+      : projectForecast(state).operatingNetBurn
+
+  const remainingBudget = cashCeiling - burn
+
+  return {
+    horizonMonths,
+    cashCeiling,
+    softCeiling,
+    arInHorizon,
+    currentBurn: burn,
+    remainingBudget,
+    onTrack: burn <= cashCeiling,
   }
 }
