@@ -23,6 +23,7 @@ import {
 import type {
   AppState,
   ExpenseBucket,
+  OneTimeExpense,
   PayrollPosition,
   PlanningHorizon,
   RevenueRow,
@@ -299,6 +300,15 @@ export default function App() {
     setState((s) => ({
       ...s,
       expenseBuckets: s.expenseBuckets.filter((b) => b.id !== id),
+    }))
+  }
+
+  function updateOneTime(id: string, patch: Partial<OneTimeExpense>) {
+    setState((s) => ({
+      ...s,
+      oneTimeExpenses: (s.oneTimeExpenses ?? []).map((e) =>
+        e.id === id ? { ...e, ...patch } : e,
+      ),
     }))
   }
 
@@ -768,6 +778,53 @@ export default function App() {
               </li>
             )
           })}
+        </ul>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h2>One-time expenses</h2>
+          <p className="hint">
+            Prospect cash hits in a single payment month (not recurring). Default
+            amount $0.
+          </p>
+        </div>
+        <ul className="bucket-list">
+          {(state.oneTimeExpenses ?? []).map((e) => (
+            <li key={e.id} className="bucket-row">
+              <div className="bucket-main one-time-main">
+                <span className="one-time-name">{e.name}</span>
+                <label>
+                  Amount
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={e.amount}
+                    aria-label={`${e.name} amount`}
+                    onChange={(ev) =>
+                      updateOneTime(e.id, {
+                        amount: Number(ev.target.value) || 0,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Payment month
+                  <input
+                    type="month"
+                    value={e.month}
+                    aria-label={`${e.name} payment month`}
+                    onChange={(ev) =>
+                      updateOneTime(e.id, {
+                        month: ev.target.value || e.month,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            </li>
+          ))}
         </ul>
       </section>
 

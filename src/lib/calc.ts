@@ -70,13 +70,26 @@ export function totalPayroll(state: AppState): number {
   return state.payroll.reduce((sum, p) => sum + (Number(p.monthlyAmount) || 0), 0)
 }
 
+/** Sum of one-time expenses whose payment month matches `month`. */
+export function oneTimeExpensesForMonth(
+  state: AppState,
+  month: YearMonth,
+): number {
+  const rows = state.oneTimeExpenses ?? []
+  return rows.reduce((sum, e) => {
+    if (e.month !== month) return sum
+    return sum + (Number(e.amount) || 0)
+  }, 0)
+}
+
 export function totalExpenses(state: AppState, month: YearMonth): number {
   const payroll = totalPayroll(state)
   const buckets = state.expenseBuckets.reduce(
     (sum, b) => sum + expenseForBucket(b, month),
     0,
   )
-  return payroll + buckets
+  const oneTime = oneTimeExpensesForMonth(state, month)
+  return payroll + buckets + oneTime
 }
 
 export function operatingReceipts(state: AppState, month: YearMonth): number {

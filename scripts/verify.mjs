@@ -39,6 +39,14 @@ function expenseForBucket(bucket, month) {
   return Number(bucket.monthlyAmount) || 0
 }
 
+function oneTimeExpensesForMonth(state, month) {
+  const rows = state.oneTimeExpenses ?? []
+  return rows.reduce((sum, e) => {
+    if (e.month !== month) return sum
+    return sum + (Number(e.amount) || 0)
+  }, 0)
+}
+
 function totalExpenses(state, month) {
   const payroll = state.payroll.reduce(
     (sum, p) => sum + (Number(p.monthlyAmount) || 0),
@@ -48,7 +56,7 @@ function totalExpenses(state, month) {
     (sum, b) => sum + expenseForBucket(b, month),
     0,
   )
-  return payroll + buckets
+  return payroll + buckets + oneTimeExpensesForMonth(state, month)
 }
 
 function operatingReceipts(state, month) {
@@ -222,6 +230,14 @@ function createDefaultState() {
       effectiveMonth: startMonth,
       overrides: {},
     })),
+    oneTimeExpenses: [
+      {
+        id: 'ot-0',
+        name: 'Data contract',
+        amount: 0,
+        month: startMonth,
+      },
+    ],
     revenueRows: revenueDefs.map((d, i) => ({
       id: `rev-${i}`,
       name: d.name,
@@ -264,6 +280,7 @@ function assertClose(a, b, msg) {
         overrides: {},
       },
     ],
+    oneTimeExpenses: [],
     revenueRows: [
       {
         id: 'r1',
@@ -418,6 +435,78 @@ function assertClose(a, b, msg) {
   budget = computeBurnBudget(state, 0)
   assert(!budget.arInHorizon, 'AR outside 3mo horizon')
   assertClose(budget.softCeiling, budget.cashCeiling, 'no AR soft uplift when timed out')
+}
+
+// --- Test 6: one-time expense appears in exactly one month; moving month moves hit ---
+{
+  const state = createDefaultState()
+  state.payroll = state.payroll.map((p) => ({ ...p, monthlyAmount: 0 }))
+  state.expenseBuckets = state.expenseBuckets.map((b) => ({
+    ...b,
+    monthlyAmount: 0,
+  }))
+  state.revenueRows = state.revenueRows.map((r) => ({ ...r, amounts: {} }))
+  state.expectedAR = 0
+  state.forecastMonths = 12
+  state.oneTimeExpenses = [
+    {
+      id: 'ot-dc',
+      name: 'Data contract',
+      amount: 8500,
+      month: '2026-11',
+    },
+  ]
+
+  let f = projectForecast(state)
+  const withOt = f.months.filter((m) => m.expenses > 0)
+  assert(withOt.length === 1, 'one-time expense in exactly one month')
+  assert(withOt[0].month === '2026-11', 'one-time in Nov 2026')
+  assertClose(withOt[0].expenses, 8500, 'one-time amount in Nov expenses')
+  assertClose(
+    f.months.reduce((s, m) => s + m.expenses, 0),
+    8500,
+    'one-time not double-counted across forecast',
+  )
+  assertClose(f.months[0].operatingNetBurn, 8500, 'one-time in month-1 operating burn')
+  assertClose(f.totalMonthlyExpenses, 8500, 'month-1 total expenses includes one-time')
+
+  // Ending cash: begin 142135 - 8500 = 133635 in Nov; later months flat
+  assertClose(f.months[0].endingCash, 142135 - 8500, 'Nov ending after one-time')
+  assertClose(f.months[1].expenses, 0, 'Dec has no one-time')
+  assertClose(f.months[1].endingCash, 142135 - 8500, 'Dec ending unchanged (no burn)')
+
+  // Move payment month → cash hit moves; not applied twice
+  state.oneTimeExpenses = [
+    {
+      id: 'ot-dc',
+      name: 'Data contract',
+      amount: 8500,
+      month: '2027-02',
+    },
+  ]
+  f = projectForecast(state)
+  const movedOt = f.months.filter((m) => m.expenses > 0)
+  assert(movedOt.length === 1, 'moved one-time still exactly one month')
+  assert(movedOt[0].month === '2027-02', 'one-time moved to Feb 2027')
+  assertClose(movedOt[0].expenses, 8500, 'moved one-time amount')
+  assertClose(
+    f.months.reduce((s, m) => s + m.expenses, 0),
+    8500,
+    'moved one-time no double count',
+  )
+  assertClose(f.months[0].expenses, 0, 'Nov no longer has one-time')
+  assertClose(f.totalMonthlyExpenses, 0, 'month-1 total excludes one-time when timed later')
+
+  // Default seed: Data contract at $0 / start month
+  const fresh = createDefaultState()
+  assert(fresh.oneTimeExpenses.length >= 1, 'defaults include one-time list')
+  assert(
+    fresh.oneTimeExpenses.some((e) => e.name === 'Data contract'),
+    'defaults seed Data contract',
+  )
+  const dc = fresh.oneTimeExpenses.find((e) => e.name === 'Data contract')
+  assertClose(dc.amount, 0, 'Data contract default amount $0')
+  assert(dc.month === fresh.startMonth, 'Data contract default month = start month')
 }
 
 if (failed > 0) {

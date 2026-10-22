@@ -27,6 +27,15 @@ export interface RevenueRow {
   isFunding: boolean
 }
 
+/** One-time cash expense applied in a single payment month only (not recurring). */
+export interface OneTimeExpense {
+  id: string
+  name: string
+  amount: number
+  /** Effective / payment month (YYYY-MM) — cash hit in this month only */
+  month: YearMonth
+}
+
 /** Allowed planning horizons (months). Reused as `forecastMonths`. */
 export const PLANNING_HORIZONS = [3, 6, 9, 12] as const
 export type PlanningHorizon = (typeof PLANNING_HORIZONS)[number]
@@ -38,6 +47,8 @@ export interface AppState {
   arCollectionMonth: YearMonth
   payroll: PayrollPosition[]
   expenseBuckets: ExpenseBucket[]
+  /** One-time Prospect expenses (e.g. Data contract); counted only in `month`. */
+  oneTimeExpenses: OneTimeExpense[]
   revenueRows: RevenueRow[]
   /** Planning / forecast horizon in months (3 | 6 | 9 | 12). Default 12. */
   forecastMonths: PlanningHorizon

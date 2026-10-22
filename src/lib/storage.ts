@@ -72,6 +72,33 @@ export function hydrateAppState(parsed: unknown): AppState {
           }
         })
       : defaults.expenseBuckets,
+    oneTimeExpenses: (() => {
+      const start = asString(parsed.startMonth, defaults.startMonth)
+      const seed = defaults.oneTimeExpenses
+      if (!Array.isArray(parsed.oneTimeExpenses)) return seed
+      const rows = parsed.oneTimeExpenses.map((e, i) => {
+        const row = isRecord(e) ? e : {}
+        const d = seed[i]
+        return {
+          id: asString(row.id, d?.id ?? `ot-${i}`),
+          name: asString(row.name, d?.name ?? `One-time ${i + 1}`),
+          amount: asNumber(row.amount, 0),
+          month: asString(row.month, d?.month ?? start),
+        }
+      })
+      // Ensure seeded "Data contract" exists for older saves
+      if (!rows.some((r) => r.name === 'Data contract')) {
+        const dc = seed.find((r) => r.name === 'Data contract') ?? seed[0]
+        if (dc) {
+          rows.unshift({
+            ...dc,
+            amount: 0,
+            month: start,
+          })
+        }
+      }
+      return rows
+    })(),
     revenueRows: Array.isArray(parsed.revenueRows)
       ? parsed.revenueRows.map((r, i) => {
           const row = isRecord(r) ? r : {}
