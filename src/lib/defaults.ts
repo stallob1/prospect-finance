@@ -49,6 +49,14 @@ export function createDefaultState(): AppState {
       effectiveMonth: startMonth,
       overrides: {},
     })),
+    oneTimeExpenses: [
+      {
+        id: id('ot'),
+        name: 'Data contract',
+        amount: 0,
+        month: startMonth,
+      },
+    ],
     revenueRows: revenueDefs.map(({ name, isFunding }) => ({
       id: id('rev'),
       name,
