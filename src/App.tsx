@@ -393,8 +393,13 @@ export default function App() {
             >
               Delete
             </button>
-            <button type="button" className="btn ghost" onClick={seedPresets}>
-              Seed Lean / Base / Hire
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={seedPresets}
+              title="Replaces all scenarios with Lean, Base, and Hire (blank-slate defaults)"
+            >
+              Reset to Lean / Base / Hire
             </button>
           </div>
         </div>
