@@ -1,17 +1,32 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import {
+  PLANNING_HORIZONS,
   addMonths,
+  computeBurnBudget,
   formatMonthLabel,
   monthKeys,
+  normalizeHorizon,
   projectForecast,
 } from './lib/calc'
-import { createDefaultState } from './lib/defaults'
-import { loadState, saveState } from './lib/storage'
+import {
+  cloneAppState,
+  createDefaultState,
+  createScenario,
+  seedNamedScenarios,
+} from './lib/defaults'
+import {
+  getActiveState,
+  loadScenarioStore,
+  saveScenarioStore,
+  withActiveState,
+} from './lib/storage'
 import type {
   AppState,
   ExpenseBucket,
   PayrollPosition,
+  PlanningHorizon,
   RevenueRow,
+  ScenarioStore,
   YearMonth,
 } from './lib/types'
 import './App.css'
@@ -123,26 +138,115 @@ function CashChart({
 }
 
 export default function App() {
-  const [state, setState] = useState<AppState>(() =>
-    typeof window !== 'undefined' ? loadState() : createDefaultState(),
+  const [store, setStore] = useState<ScenarioStore>(() =>
+    typeof window !== 'undefined'
+      ? loadScenarioStore()
+      : (() => {
+          const s = createScenario('Working', createDefaultState())
+          return { activeScenarioId: s.id, scenarios: [s] }
+        })(),
   )
   const [overrideOpen, setOverrideOpen] = useState<Record<string, boolean>>({})
+  const [renaming, setRenaming] = useState(false)
+  const [renameDraft, setRenameDraft] = useState('')
   const formId = useId()
 
+  const state = useMemo(() => getActiveState(store), [store])
+  const activeScenario = store.scenarios.find(
+    (s) => s.id === store.activeScenarioId,
+  )
+
   useEffect(() => {
-    saveState(state)
-  }, [state])
+    saveScenarioStore(store)
+  }, [store])
+
+  function setState(updater: AppState | ((prev: AppState) => AppState)) {
+    setStore((prev) => {
+      const current = getActiveState(prev)
+      const next =
+        typeof updater === 'function'
+          ? (updater as (p: AppState) => AppState)(current)
+          : updater
+      return withActiveState(prev, next)
+    })
+  }
 
   const forecast = useMemo(() => projectForecast(state), [state])
+  const burnBudget = useMemo(
+    () => computeBurnBudget(state, forecast.operatingNetBurn),
+    [state, forecast.operatingNetBurn],
+  )
   const months = useMemo(
-    () => monthKeys(state.startMonth, state.forecastMonths),
+    () => monthKeys(state.startMonth, normalizeHorizon(state.forecastMonths)),
     [state.startMonth, state.forecastMonths],
   )
 
   function reset() {
-    const next = createDefaultState()
-    setState(next)
+    setState(createDefaultState())
     setOverrideOpen({})
+  }
+
+  function setHorizon(h: PlanningHorizon) {
+    setState((s) => ({ ...s, forecastMonths: h }))
+  }
+
+  function switchScenario(id: string) {
+    if (id === store.activeScenarioId) return
+    setStore((prev) => ({ ...prev, activeScenarioId: id }))
+    setOverrideOpen({})
+    setRenaming(false)
+  }
+
+  function addScenario() {
+    const name = `Scenario ${store.scenarios.length + 1}`
+    const scen = createScenario(name, cloneAppState(state))
+    setStore((prev) => ({
+      activeScenarioId: scen.id,
+      scenarios: [...prev.scenarios, scen],
+    }))
+    setOverrideOpen({})
+  }
+
+  function seedPresets() {
+    const seeded = seedNamedScenarios()
+    setStore(seeded)
+    setOverrideOpen({})
+    setRenaming(false)
+  }
+
+  function deleteActiveScenario() {
+    if (store.scenarios.length <= 1) return
+    setStore((prev) => {
+      const remaining = prev.scenarios.filter(
+        (s) => s.id !== prev.activeScenarioId,
+      )
+      return {
+        scenarios: remaining,
+        activeScenarioId: remaining[0].id,
+      }
+    })
+    setOverrideOpen({})
+    setRenaming(false)
+  }
+
+  function startRename() {
+    setRenameDraft(activeScenario?.name ?? '')
+    setRenaming(true)
+  }
+
+  function commitRename() {
+    const name = renameDraft.trim()
+    if (!name) {
+      setRenaming(false)
+      return
+    }
+    setStore((prev) => ({
+      ...prev,
+      scenarios: prev.scenarios.map((s) =>
+        s.id === prev.activeScenarioId ? { ...s, name } : s,
+      ),
+    }))
+    setRenaming(false)
   }
 
   function updatePayroll(id: string, patch: Partial<PayrollPosition>) {
@@ -250,6 +354,11 @@ export default function App() {
     0,
   )
 
+  const ceilingLabel =
+    burnBudget.arInHorizon && burnBudget.softCeiling > burnBudget.cashCeiling
+      ? `${money(burnBudget.cashCeiling)}–${money(burnBudget.softCeiling)}`
+      : money(burnBudget.cashCeiling)
+
   return (
     <div className="app">
       <header className="hero-band">
@@ -260,6 +369,112 @@ export default function App() {
           lasts.
         </p>
       </header>
+
+      <section className="panel scenario-bar" aria-label="Scenarios">
+        <div className="panel-head">
+          <h2>Scenario</h2>
+          <div className="scenario-actions">
+            <button type="button" className="btn ghost" onClick={addScenario}>
+              Duplicate
+            </button>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={startRename}
+              disabled={!activeScenario}
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              className="btn ghost danger"
+              onClick={deleteActiveScenario}
+              disabled={store.scenarios.length <= 1}
+            >
+              Delete
+            </button>
+            <button type="button" className="btn ghost" onClick={seedPresets}>
+              Seed Lean / Base / Hire
+            </button>
+          </div>
+        </div>
+        <div className="scenario-row">
+          <label className="scenario-select">
+            Active
+            <select
+              value={store.activeScenarioId}
+              onChange={(e) => switchScenario(e.target.value)}
+              aria-label="Active scenario"
+            >
+              {store.scenarios.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {renaming && (
+            <div className="rename-row">
+              <input
+                type="text"
+                value={renameDraft}
+                aria-label="Scenario name"
+                autoFocus
+                onChange={(e) => setRenameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename()
+                  if (e.key === 'Escape') setRenaming(false)
+                }}
+              />
+              <button type="button" className="btn" onClick={commitRename}>
+                Save name
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setRenaming(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          <p className="hint scenario-hint">
+            Edits auto-save to the active scenario. Switching loads that
+            scenario’s full model (payroll, expenses, revenue, assumptions,
+            horizon).
+          </p>
+        </div>
+      </section>
+
+      <section className="panel horizon-panel" aria-label="Planning horizon">
+        <div className="panel-head">
+          <h2>Planning horizon</h2>
+          <p className="hint">
+            Forecast table, chart, and runway use this window. Default 12.
+          </p>
+        </div>
+        <div
+          className="horizon-toggle"
+          role="group"
+          aria-label="Horizon in months"
+        >
+          {PLANNING_HORIZONS.map((h) => (
+            <button
+              key={h}
+              type="button"
+              className={
+                normalizeHorizon(state.forecastMonths) === h
+                  ? 'btn horizon-btn active'
+                  : 'btn ghost horizon-btn'
+              }
+              aria-pressed={normalizeHorizon(state.forecastMonths) === h}
+              onClick={() => setHorizon(h)}
+            >
+              {h} mo
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="summary-grid" aria-label="Runway summary">
         <article>
@@ -274,7 +489,7 @@ export default function App() {
         <article>
           <h2>Operating net burn</h2>
           <p className="metric">{money(forecast.operatingNetBurn)}</p>
-          <p className="hint">Expenses − op receipts − AR</p>
+          <p className="hint">Expenses − op receipts − AR · month 1</p>
         </article>
         <article className="runway-card">
           <h2>Runway</h2>
@@ -284,7 +499,46 @@ export default function App() {
               Exhaustion: {formatMonthLabel(forecast.runway.exhaustionMonth)}
             </p>
           )}
+          <p className="hint">Within {state.forecastMonths}-month horizon</p>
         </article>
+      </section>
+
+      <section
+        className={`panel burn-budget ${burnBudget.onTrack ? 'on-track' : 'over-budget'}`}
+        aria-label="Burn budget"
+      >
+        <div className="panel-head">
+          <h2>Burn budget for {burnBudget.horizonMonths} months</h2>
+          <span
+            className={`status-pill ${burnBudget.onTrack ? 'ok' : 'warn'}`}
+          >
+            {burnBudget.onTrack ? 'On track' : 'Over budget'}
+          </span>
+        </div>
+        <div className="burn-grid">
+          <article>
+            <h3>Max monthly burn</h3>
+            <p className="metric">{ceilingLabel}</p>
+            <p className="hint">
+              Cash ÷ horizon
+              {burnBudget.arInHorizon
+                ? ` · soft upper includes timed A/R (${money(state.expectedAR)}) — not in starting cash`
+                : ' · A/R outside this horizon (not added)'}
+            </p>
+          </article>
+          <article>
+            <h3>Current burn (mo. 1)</h3>
+            <p className="metric">{money(burnBudget.currentBurn)}</p>
+            <p className="hint">Compared to cash ceiling</p>
+          </article>
+          <article>
+            <h3>Remaining burn budget</h3>
+            <p className="metric">{money(burnBudget.remainingBudget)}</p>
+            <p className="hint">
+              Cash ceiling − month-1 operating net burn
+            </p>
+          </article>
+        </div>
       </section>
 
       <section className="panel">
