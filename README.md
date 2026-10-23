@@ -20,11 +20,13 @@ Open the URL Vite prints (usually `http://localhost:5173`).
 
 ## Useful scripts
 
-- `npm run verify` — roll-forward, zero-expense “No cash burn”, A/R counted once
+- `npm run verify` — roll-forward, zero-expense “No cash burn”, A/R counted once, export CSV helpers
 - `npm run build` — production build
 - **Reset** in the UI restores defaults and clears projections
+- **Export** — Download CSV or Print / PDF of the active scenario’s current (adjusted) numbers
 
 ## Notes
 
 - Prospect only; The Vurb Company appears only as the adjustable “Vurb service contract” expense
 - Funding is separate from operating revenue in burn and runway math
+- Hosted under Vite `base: '/prospect-finance/'`

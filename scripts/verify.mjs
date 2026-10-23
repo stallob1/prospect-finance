@@ -592,6 +592,285 @@ function assertClose(a, b, msg) {
   assertClose(same.months[1].expenses, 0, 'other months stay zero')
 }
 
+// --- Export helpers (mirror src/lib/export.ts) ---
+
+function slugifyScenario(name) {
+  const slug = String(name)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return slug || 'scenario'
+}
+
+function formatExportDate(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}${m}${day}`
+}
+
+function exportCsvFilename(scenarioName, asOf = new Date()) {
+  return `prospect-runway-${slugifyScenario(scenarioName)}-${formatExportDate(asOf)}.csv`
+}
+
+function escapeCsvCell(cell) {
+  if (typeof cell === 'number') {
+    if (!Number.isFinite(cell)) return ''
+    return String(cell)
+  }
+  const s = cell ?? ''
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`
+  }
+  return s
+}
+
+function rowsToCsv(rows) {
+  return rows.map((row) => row.map(escapeCsvCell).join(',')).join('\n') + '\n'
+}
+
+function buildExportRows(state, scenarioName, options = {}) {
+  const forecast = options.forecast ?? projectForecast(state)
+  const burnBudget =
+    options.burnBudget ??
+    computeBurnBudget(state, forecast.operatingNetBurn)
+  const horizon = normalizeHorizon(state.forecastMonths)
+  const keys = monthKeys(state.startMonth, horizon)
+  const rows = []
+  const n = (v) => {
+    const x = Number(v)
+    return Number.isFinite(x) ? x : 0
+  }
+
+  rows.push(['Assumptions'], [])
+  rows.push(['Field', 'Value'])
+  rows.push(['Scenario', scenarioName])
+  rows.push(['Start month', state.startMonth])
+  rows.push(['Available cash', n(state.availableCash)])
+  rows.push(['A/R amount', n(state.expectedAR)])
+  rows.push(['A/R collection month', state.arCollectionMonth])
+  rows.push(['Planning horizon (months)', horizon])
+  rows.push([])
+
+  rows.push(['Summary'], [])
+  rows.push(['Field', 'Value'])
+  rows.push(['Total mo.1 expenses', n(forecast.totalMonthlyExpenses)])
+  rows.push(['Operating net burn', n(forecast.operatingNetBurn)])
+  rows.push(['Runway', forecast.runway.label])
+  rows.push(['Burn budget max monthly (cash ceiling)', n(burnBudget.cashCeiling)])
+  if (burnBudget.arInHorizon && burnBudget.softCeiling > burnBudget.cashCeiling) {
+    rows.push([
+      'Burn budget soft ceiling (cash + A/R)',
+      n(burnBudget.softCeiling),
+    ])
+  }
+  rows.push(['Burn budget current (mo. 1)', n(burnBudget.currentBurn)])
+  rows.push(['Burn budget remaining', n(burnBudget.remainingBudget)])
+  rows.push(['Burn budget on track', burnBudget.onTrack ? 'yes' : 'no'])
+  rows.push([])
+
+  rows.push(['Payroll'], [])
+  rows.push(['Name', 'Monthly amount'])
+  let payrollTotal = 0
+  for (const p of state.payroll) {
+    const amt = n(p.monthlyAmount)
+    payrollTotal += amt
+    rows.push([p.name, amt])
+  }
+  rows.push(['Total', payrollTotal])
+  rows.push([])
+
+  rows.push(['Expense buckets'], [])
+  rows.push(['Name', 'Monthly amount', 'Effective month'])
+  for (const b of state.expenseBuckets) {
+    rows.push([b.name, n(b.monthlyAmount), b.effectiveMonth])
+  }
+  rows.push([])
+
+  rows.push(['One-time expenses'], [])
+  rows.push(['Name', 'Amount', 'Payment month'])
+  const oneTimes = state.oneTimeExpenses ?? []
+  if (oneTimes.length === 0) {
+    rows.push(['(none)', 0, ''])
+  } else {
+    for (const e of oneTimes) {
+      rows.push([e.name, n(e.amount), e.month])
+    }
+  }
+  rows.push([])
+
+  rows.push(['Revenue & funding'], [])
+  rows.push(['Name', 'Type', ...keys])
+  for (const r of state.revenueRows) {
+    rows.push([
+      r.name,
+      r.isFunding ? 'Funding' : 'Operating',
+      ...keys.map((k) => n(r.amounts[k])),
+    ])
+  }
+  rows.push([])
+
+  rows.push(['Monthly cash'], [])
+  rows.push([
+    'Month',
+    'Beginning',
+    'Operating receipts',
+    'A/R',
+    'Funding',
+    'Expenses',
+    'Ending',
+    'Operating net burn',
+  ])
+  for (const m of forecast.months) {
+    rows.push([
+      m.month,
+      n(m.beginningCash),
+      n(m.operatingReceipts),
+      n(m.arCollections),
+      n(m.funding),
+      n(m.expenses),
+      n(m.endingCash),
+      n(m.operatingNetBurn),
+    ])
+  }
+
+  return rows
+}
+
+// --- Test 8: export filename + CSV reflects adjusted scenario state ---
+{
+  assert(slugifyScenario('Base Case') === 'base-case', 'slugify spaces')
+  assert(slugifyScenario('  Lean!! ') === 'lean', 'slugify trim/punct')
+  assert(slugifyScenario('') === 'scenario', 'slugify empty fallback')
+
+  const asOf = new Date(2026, 9, 23) // Oct 23, 2026 local
+  assert(
+    exportCsvFilename('Base', asOf) === 'prospect-runway-base-20261023.csv',
+    'export filename pattern',
+  )
+  assert(
+    exportCsvFilename('Hire Plan', asOf) ===
+      'prospect-runway-hire-plan-20261023.csv',
+    'export filename with multi-word scenario',
+  )
+
+  const state = createDefaultState()
+  state.availableCash = 50000
+  state.expectedAR = 2000
+  state.arCollectionMonth = '2026-12'
+  state.forecastMonths = 3
+  state.payroll = [
+    { id: 'p1', name: 'Alex', monthlyAmount: 4000 },
+    { id: 'p2', name: 'Blair', monthlyAmount: 2500 },
+  ]
+  state.expenseBuckets = [
+    {
+      id: 'e1',
+      name: 'Overhead',
+      monthlyAmount: 1500,
+      effectiveMonth: '2026-11',
+      overrides: {},
+    },
+  ]
+  state.oneTimeExpenses = [
+    {
+      id: 'ot1',
+      name: 'Data contract',
+      amount: 8500,
+      month: '2026-11',
+    },
+  ]
+  state.revenueRows = [
+    {
+      id: 'r1',
+      name: 'Ads',
+      isFunding: false,
+      amounts: { '2026-11': 300, '2026-12': 400, '2027-01': 500 },
+    },
+    {
+      id: 'r2',
+      name: 'Funding',
+      isFunding: true,
+      amounts: { '2026-12': 10000 },
+    },
+  ]
+
+  const forecast = projectForecast(state)
+  const burnBudget = computeBurnBudget(state, forecast.operatingNetBurn)
+  const rows = buildExportRows(state, 'Adjusted Demo', { forecast, burnBudget })
+  const csv = rowsToCsv(rows)
+
+  assert(csv.includes('Assumptions'), 'CSV has Assumptions section')
+  assert(csv.includes('Summary'), 'CSV has Summary section')
+  assert(csv.includes('Payroll'), 'CSV has Payroll section')
+  assert(csv.includes('Expense buckets'), 'CSV has Expense buckets')
+  assert(csv.includes('One-time expenses'), 'CSV has One-time expenses')
+  assert(csv.includes('Revenue & funding'), 'CSV has Revenue & funding')
+  assert(csv.includes('Monthly cash'), 'CSV has Monthly cash')
+
+  assert(csv.includes('Adjusted Demo'), 'CSV includes scenario name')
+  assert(csv.includes('Alex,4000'), 'CSV payroll uses adjusted amount')
+  assert(csv.includes('Blair,2500'), 'CSV second payroll row')
+  assert(csv.includes('Total,6500'), 'CSV payroll total')
+  assert(csv.includes('Overhead,1500,2026-11'), 'CSV expense bucket adjusted')
+  assert(
+    csv.includes('Data contract,8500,2026-11'),
+    'CSV one-time uses adjusted amount/month',
+  )
+  assert(csv.includes('Available cash,50000'), 'CSV available cash adjusted')
+  assert(csv.includes('A/R amount,2000'), 'CSV AR adjusted')
+  assert(csv.includes('A/R collection month,2026-12'), 'CSV AR month adjusted')
+  assert(csv.includes('Planning horizon (months),3'), 'CSV horizon adjusted')
+
+  // Plain numbers — no $ currency symbols in numeric cells
+  assert(!/Available cash,\$/.test(csv), 'CSV cash has no $ prefix')
+  assert(!/Alex,\$4000/.test(csv), 'CSV payroll has no $')
+
+  // Month-1 expenses: payroll 6500 + overhead 1500 + one-time 8500 = 16500
+  assertClose(forecast.totalMonthlyExpenses, 16500, 'export fixture mo.1 expenses')
+  assert(
+    csv.includes(`Total mo.1 expenses,${forecast.totalMonthlyExpenses}`),
+    'CSV summary mo.1 expenses matches forecast',
+  )
+  assert(
+    csv.includes(`Operating net burn,${forecast.operatingNetBurn}`),
+    'CSV operating net burn matches forecast',
+  )
+  assert(
+    csv.includes(`Burn budget current (mo. 1),${burnBudget.currentBurn}`),
+    'CSV burn budget current matches',
+  )
+  assert(
+    csv.includes(
+      `Burn budget max monthly (cash ceiling),${burnBudget.cashCeiling}`,
+    ),
+    'CSV burn ceiling matches',
+  )
+
+  // Monthly cash first row beginning = available cash
+  const cashIdx = rows.findIndex(
+    (r) => r[0] === 'Month' && r[1] === 'Beginning',
+  )
+  assert(cashIdx >= 0, 'monthly cash header present')
+  const nov = rows[cashIdx + 1]
+  assert(nov[0] === '2026-11', 'first cash month is start')
+  assertClose(nov[1], 50000, 'CSV beginning cash is adjusted available')
+  assertClose(nov[2], 300, 'CSV Nov operating receipts')
+  assertClose(nov[3], 0, 'CSV Nov AR zero (collected Dec)')
+  assertClose(nov[5], 16500, 'CSV Nov expenses')
+
+  // Escaping
+  assert(
+    escapeCsvCell('say "hi"') === '"say ""hi"""',
+    'CSV escapes quotes',
+  )
+  assert(escapeCsvCell(142135) === '142135', 'CSV number stays plain')
+
+  // Defaults alone would use availableCash 142135 — ensure we did not export that
+  assert(!csv.includes('Available cash,142135'), 'CSV not using default cash')
+}
+
 if (failed > 0) {
   console.error(`\n${failed} assertion(s) failed`)
   process.exit(1)
