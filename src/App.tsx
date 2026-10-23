@@ -15,6 +15,11 @@ import {
   seedNamedScenarios,
 } from './lib/defaults'
 import {
+  buildExportPayload,
+  downloadCsv,
+  openPrintReport,
+} from './lib/export'
+import {
   getActiveState,
   loadScenarioStore,
   saveScenarioStore,
@@ -189,6 +194,19 @@ export default function App() {
 
   function setHorizon(h: PlanningHorizon) {
     setState((s) => ({ ...s, forecastMonths: h }))
+  }
+
+  function exportActiveReport(kind: 'csv' | 'print') {
+    const name = activeScenario?.name ?? 'Scenario'
+    const payload = buildExportPayload(state, name, {
+      forecast,
+      burnBudget,
+    })
+    if (kind === 'csv') {
+      downloadCsv(payload.csv, payload.filename)
+      return
+    }
+    openPrintReport(payload.printHtml)
   }
 
   function switchScenario(id: string) {
@@ -549,6 +567,32 @@ export default function App() {
           )}
           <p className="hint">Within {state.forecastMonths}-month horizon</p>
         </article>
+      </section>
+
+      <section className="panel export-bar" aria-label="Export report">
+        <div className="panel-head">
+          <h2>Export</h2>
+          <p className="hint export-hint">
+            Active scenario’s current numbers (assumptions, summary, payroll,
+            expenses, revenue, monthly cash).
+          </p>
+        </div>
+        <div className="export-actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => exportActiveReport('csv')}
+          >
+            Download CSV
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => exportActiveReport('print')}
+          >
+            Print / PDF
+          </button>
+        </div>
       </section>
 
       <section
