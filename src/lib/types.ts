@@ -37,7 +37,7 @@ export interface OneTimeExpense {
 }
 
 /** Allowed planning horizons (months). Reused as `forecastMonths`. */
-export const PLANNING_HORIZONS = [3, 6, 7, 9, 10, 11, 12] as const
+export const PLANNING_HORIZONS = [3, 6, 7, 8, 9, 10, 11, 12] as const
 export type PlanningHorizon = (typeof PLANNING_HORIZONS)[number]
 
 export interface AppState {
@@ -50,7 +50,7 @@ export interface AppState {
   /** One-time Prospect expenses (e.g. Data contract); counted only in `month`. */
   oneTimeExpenses: OneTimeExpense[]
   revenueRows: RevenueRow[]
-  /** Planning / forecast horizon in months (3 | 6 | 7 | 9 | 10 | 11 | 12). Default 12. */
+  /** Planning / forecast horizon in months (3 | 6 | 7 | 8 | 9 | 10 | 11 | 12). Default 12. */
   forecastMonths: PlanningHorizon
 }
 

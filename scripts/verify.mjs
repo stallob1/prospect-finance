@@ -3,7 +3,7 @@
  * Keep in sync with the TypeScript sources when changing forecast rules.
  */
 
-const PLANNING_HORIZONS = [3, 6, 7, 9, 10, 11, 12]
+const PLANNING_HORIZONS = [3, 6, 7, 8, 9, 10, 11, 12]
 
 function normalizeHorizon(n) {
   const v = typeof n === 'number' ? n : Number(n)
@@ -394,6 +394,7 @@ function assertClose(a, b, msg) {
 
   assert(normalizeHorizon(6) === 6, 'normalizeHorizon keeps 6')
   assert(normalizeHorizon(7) === 7, 'normalizeHorizon keeps 7')
+  assert(normalizeHorizon(8) === 8, 'normalizeHorizon keeps 8')
   assert(normalizeHorizon(10) === 10, 'normalizeHorizon keeps 10')
   assert(normalizeHorizon(11) === 11, 'normalizeHorizon keeps 11')
   assert(normalizeHorizon(99) === 12, 'normalizeHorizon clamps invalid to 12')
